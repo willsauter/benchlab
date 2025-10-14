@@ -44,10 +44,16 @@ class DiskBenchmark:
         """Generate random data for writing"""
         return os.urandom(size)
     
-    def sequential_write(self, progress_callback: Optional[Callable] = None) -> BenchmarkResult:
+    def sequential_write(self, progress_callback: Optional[Callable] = None, 
+                        file_size_mb: Optional[int] = None, 
+                        block_size_kb: Optional[int] = None) -> BenchmarkResult:
         """Test sequential write performance"""
-        data = self._generate_random_data(self.block_size)
-        blocks = self.file_size // self.block_size
+        # Use provided parameters or defaults
+        block_size = (block_size_kb * 1024) if block_size_kb else self.block_size
+        file_size = (file_size_mb * 1024 * 1024) if file_size_mb else self.file_size
+        
+        data = self._generate_random_data(block_size)
+        blocks = file_size // block_size
         
         start_time = time.time()
         with open(self.test_file, 'wb') as f:
@@ -60,27 +66,33 @@ class DiskBenchmark:
         os.sync()
         
         duration = time.time() - start_time
-        throughput_mbps = (self.file_size / (1024 * 1024)) / duration
+        throughput_mbps = (file_size / (1024 * 1024)) / duration
         
         return BenchmarkResult(
             test_name="Sequential Write",
             duration=duration,
-            bytes_transferred=self.file_size,
+            bytes_transferred=file_size,
             throughput_mbps=throughput_mbps
         )
     
-    def sequential_read(self, progress_callback: Optional[Callable] = None) -> BenchmarkResult:
+    def sequential_read(self, progress_callback: Optional[Callable] = None,
+                       file_size_mb: Optional[int] = None,
+                       block_size_kb: Optional[int] = None) -> BenchmarkResult:
         """Test sequential read performance"""
         if not os.path.exists(self.test_file):
             raise FileNotFoundError("Test file not found. Run sequential_write first.")
         
-        blocks = self.file_size // self.block_size
+        # Use provided parameters or defaults
+        block_size = (block_size_kb * 1024) if block_size_kb else self.block_size
+        file_size = (file_size_mb * 1024 * 1024) if file_size_mb else self.file_size
+        
+        blocks = file_size // block_size
         bytes_read = 0
         
         start_time = time.time()
         with open(self.test_file, 'rb') as f:
             for i in range(blocks):
-                data = f.read(self.block_size)
+                data = f.read(block_size)
                 bytes_read += len(data)
                 if progress_callback:
                     progress_callback((i + 1) / blocks * 100)
@@ -95,16 +107,22 @@ class DiskBenchmark:
             throughput_mbps=throughput_mbps
         )
     
-    def random_write(self, num_operations: int = 1000, progress_callback: Optional[Callable] = None) -> BenchmarkResult:
+    def random_write(self, num_operations: int = 1000, progress_callback: Optional[Callable] = None,
+                    file_size_mb: Optional[int] = None,
+                    block_size_kb: Optional[int] = None) -> BenchmarkResult:
         """Test random write performance"""
-        data = self._generate_random_data(self.block_size)
+        # Use provided parameters or defaults
+        block_size = (block_size_kb * 1024) if block_size_kb else self.block_size
+        file_size = (file_size_mb * 1024 * 1024) if file_size_mb else self.file_size
+        
+        data = self._generate_random_data(block_size)
         
         # Create file if it doesn't exist
         if not os.path.exists(self.test_file):
             with open(self.test_file, 'wb') as f:
-                f.write(b'\0' * self.file_size)
+                f.write(b'\0' * file_size)
         
-        max_position = self.file_size - self.block_size
+        max_position = file_size - block_size
         
         start_time = time.time()
         with open(self.test_file, 'r+b') as f:
@@ -118,7 +136,7 @@ class DiskBenchmark:
         os.sync()
         
         duration = time.time() - start_time
-        bytes_transferred = num_operations * self.block_size
+        bytes_transferred = num_operations * block_size
         throughput_mbps = (bytes_transferred / (1024 * 1024)) / duration
         iops = int(num_operations / duration)
         
@@ -130,12 +148,18 @@ class DiskBenchmark:
             iops=iops
         )
     
-    def random_read(self, num_operations: int = 1000, progress_callback: Optional[Callable] = None) -> BenchmarkResult:
+    def random_read(self, num_operations: int = 1000, progress_callback: Optional[Callable] = None,
+                   file_size_mb: Optional[int] = None,
+                   block_size_kb: Optional[int] = None) -> BenchmarkResult:
         """Test random read performance"""
         if not os.path.exists(self.test_file):
             raise FileNotFoundError("Test file not found. Run sequential_write first.")
         
-        max_position = self.file_size - self.block_size
+        # Use provided parameters or defaults
+        block_size = (block_size_kb * 1024) if block_size_kb else self.block_size
+        file_size = (file_size_mb * 1024 * 1024) if file_size_mb else self.file_size
+        
+        max_position = file_size - block_size
         bytes_read = 0
         
         start_time = time.time()
@@ -143,7 +167,7 @@ class DiskBenchmark:
             for i in range(num_operations):
                 position = random.randint(0, max_position)
                 f.seek(position)
-                data = f.read(self.block_size)
+                data = f.read(block_size)
                 bytes_read += len(data)
                 if progress_callback:
                     progress_callback((i + 1) / num_operations * 100)

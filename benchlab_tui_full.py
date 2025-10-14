@@ -14,6 +14,7 @@ from rich.table import Table
 from rich.text import Text
 from rich import box
 from rich.align import Align
+from rich.prompt import Prompt, Confirm, IntPrompt
 
 from benchmark import DiskBenchmark, BenchmarkResult
 from cpu_benchmark import CPUBenchmark, CPUBenchmarkResult
@@ -52,6 +53,8 @@ class BenchLabTUI:
         
         # Configuration (set by main)
         self.config = {
+            'disk_size': file_size_mb,
+            'disk_block': block_size_kb,
             'cpu_duration': 5,
             'cpu_multi_duration': 10,
             'mem_size': 100,
@@ -297,6 +300,8 @@ class BenchLabTUI:
         layout = self.create_layout()
         
         # Get configuration
+        disk_size = self.config['disk_size']
+        disk_block = self.config['disk_block']
         cpu_dur = self.config['cpu_duration']
         cpu_multi_dur = self.config['cpu_multi_duration']
         mem_size = self.config['mem_size']
@@ -310,22 +315,38 @@ class BenchLabTUI:
                 # === DISK TESTS ===
                 if "disk" in self.categories:
                     if self.should_run_test("disk.seq-write"):
-                        self.run_benchmark("DISK", "Sequential Write 📝", self.disk_benchmark.sequential_write)
+                        self.run_benchmark("DISK", "Sequential Write 📝", 
+                                         lambda progress_callback: self.disk_benchmark.sequential_write(
+                                             progress_callback=progress_callback,
+                                             file_size_mb=disk_size,
+                                             block_size_kb=disk_block))
                         self.update_layout(layout)
                         time.sleep(0.3)
                     
                     if self.should_run_test("disk.seq-read"):
-                        self.run_benchmark("DISK", "Sequential Read 📖", self.disk_benchmark.sequential_read)
+                        self.run_benchmark("DISK", "Sequential Read 📖", 
+                                         lambda progress_callback: self.disk_benchmark.sequential_read(
+                                             progress_callback=progress_callback,
+                                             file_size_mb=disk_size,
+                                             block_size_kb=disk_block))
                         self.update_layout(layout)
                         time.sleep(0.3)
                     
                     if self.should_run_test("disk.rand-write"):
-                        self.run_benchmark("DISK", "Random Write 🎲", self.disk_benchmark.random_write)
+                        self.run_benchmark("DISK", "Random Write 🎲", 
+                                         lambda progress_callback: self.disk_benchmark.random_write(
+                                             progress_callback=progress_callback,
+                                             file_size_mb=disk_size,
+                                             block_size_kb=disk_block))
                         self.update_layout(layout)
                         time.sleep(0.3)
                     
                     if self.should_run_test("disk.rand-read"):
-                        self.run_benchmark("DISK", "Random Read 🎯", self.disk_benchmark.random_read)
+                        self.run_benchmark("DISK", "Random Read 🎯", 
+                                         lambda progress_callback: self.disk_benchmark.random_read(
+                                             progress_callback=progress_callback,
+                                             file_size_mb=disk_size,
+                                             block_size_kb=disk_block))
                         self.update_layout(layout)
                         time.sleep(0.5)
                 
@@ -457,23 +478,230 @@ class BenchLabTUI:
     def show_welcome(self):
         """Show welcome screen"""
         welcome_text = Text()
-        welcome_text.append("\n\n")
-        welcome_text.append("    ⚡ ", style="bold yellow")
+        welcome_text.append("\n")
+        welcome_text.append("    ", style="bold yellow")
         welcome_text.append("BENCHLAB", style="bold cyan")
-        welcome_text.append(" ⚡", style="bold yellow")
-        welcome_text.append("\n\n")
-        welcome_text.append("  System Performance Benchmark Suite\n\n", style="italic bright_white")
-        welcome_text.append("  Starting comprehensive benchmarks...\n\n", style="dim")
+        welcome_text.append(" ", style="bold yellow")
+        welcome_text.append("\n", style="bold yellow")
+        welcome_text.append("    System Performance Benchmarking Suite\n", style="italic bright_white")
+        welcome_text.append("\n")
         
         panel = Panel(
-            Align.center(welcome_text, vertical="middle"),
-            box=box.DOUBLE_EDGE,
-            border_style="cyan",
-            style="bold"
+            Align.center(welcome_text),
+            box=box.DOUBLE,
+            style="bold blue"
         )
         
         self.console.print(panel)
         time.sleep(1)
+    
+    def show_interactive_menu(self) -> bool:
+        """Show interactive configuration menu. Returns True if user wants to continue."""
+        self.console.clear()
+        self.show_welcome()
+        
+        # Main menu
+        self.console.print("\n[bold cyan]═══ Main Menu ═══[/bold cyan]\n")
+        self.console.print("[1] Run all tests with default settings")
+        self.console.print("[2] Customize test configuration")
+        self.console.print("[3] Quick test (fast settings)")
+        self.console.print("[4] Exit")
+        
+        choice = Prompt.ask("\nSelect option", choices=["1", "2", "3", "4"], default="1")
+        
+        if choice == "4":
+            self.console.print("\n[yellow]Exiting...[/yellow]")
+            return False
+        elif choice == "1":
+            # Use defaults, all categories
+            self.categories = ["disk", "cpu", "memory", "gpu"]
+            self.config['selected_tests'] = None
+            return True
+        elif choice == "3":
+            # Quick test settings
+            self.categories = ["disk", "cpu", "memory"]
+            self.config = {
+                'disk_size': 50,
+                'disk_block': 4,
+                'cpu_duration': 3,
+                'cpu_multi_duration': 5,
+                'mem_size': 50,
+                'gpu_iterations': 50,
+                'selected_tests': None
+            }
+            self.console.print("\n[green] Quick test mode selected (faster settings)[/green]")
+            time.sleep(1)
+            return True
+        else:
+            # Customize
+            return self._customize_configuration()
+    
+    def _customize_configuration(self) -> bool:
+        """Interactive configuration customization"""
+        self.console.clear()
+        self.console.print("\n[bold cyan]═══ Customize Configuration ═══[/bold cyan]\n")
+        
+        # Step 1: Select categories
+        self.console.print("[bold yellow]Step 1: Select Test Categories[/bold yellow]\n")
+        self.console.print("Available categories:")
+        self.console.print("  [1] Disk I/O (4 tests)")
+        self.console.print("  [2] CPU (5 tests)")
+        self.console.print("  [3] Memory (7 tests)")
+        gpu_text = "  [4] GPU/AI (6 tests)"
+        if not self.gpu_available:
+            gpu_text += " [dim](not available)[/dim]"
+        self.console.print(gpu_text)
+        self.console.print("  [5] All categories")
+        
+        cat_choice = Prompt.ask("\nSelect categories (comma-separated numbers)", default="5")
+        
+        # Parse category selection
+        cat_map = {"1": "disk", "2": "cpu", "3": "memory", "4": "gpu"}
+        if cat_choice.strip() == "5":
+            self.categories = ["disk", "cpu", "memory", "gpu"]
+        else:
+            selected = [cat_map[c.strip()] for c in cat_choice.split(",") if c.strip() in cat_map]
+            self.categories = selected if selected else ["disk", "cpu", "memory", "gpu"]
+        
+        # Step 2: Specific tests or all in category?
+        self.console.print("\n[bold yellow]Step 2: Test Selection[/bold yellow]\n")
+        run_all_in_cat = Confirm.ask("Run all tests in selected categories?", default=True)
+        
+        if not run_all_in_cat:
+            self.config['selected_tests'] = self._select_specific_tests()
+        else:
+            self.config['selected_tests'] = None
+        
+        # Step 3: Configure parameters
+        self.console.print("\n[bold yellow]Step 3: Configure Parameters[/bold yellow]\n")
+        configure_params = Confirm.ask("Customize test parameters?", default=False)
+        
+        if configure_params:
+            self._configure_parameters()
+        
+        # Summary
+        self.console.print("\n[bold green]═══ Configuration Summary ═══[/bold green]\n")
+        self.console.print(f"Categories: [cyan]{', '.join(self.categories).upper()}[/cyan]")
+        if self.config.get('selected_tests'):
+            self.console.print(f"Tests: [cyan]{len(self.config['selected_tests'])} selected[/cyan]")
+        else:
+            self.console.print("Tests: [cyan]All in selected categories[/cyan]")
+        self.console.print(f"Disk: [cyan]{self.config['disk_size']} MB, {self.config['disk_block']} KB blocks[/cyan]")
+        self.console.print(f"CPU: [cyan]{self.config['cpu_duration']}s single, {self.config['cpu_multi_duration']}s multi[/cyan]")
+        self.console.print(f"Memory: [cyan]{self.config['mem_size']} MB buffer[/cyan]")
+        self.console.print(f"GPU: [cyan]{self.config['gpu_iterations']} iterations[/cyan]")
+        
+        self.console.print("")
+        proceed = Confirm.ask("Start benchmark with these settings?", default=True)
+        
+        if not proceed:
+            retry = Confirm.ask("Return to main menu?", default=True)
+            if retry:
+                return self.show_interactive_menu()
+            return False
+        
+        return True
+    
+    def _select_specific_tests(self) -> List[str]:
+        """Allow user to select specific tests"""
+        selected = []
+        
+        test_catalog = {
+            "disk": [
+                ("disk.seq-write", "Sequential write"),
+                ("disk.seq-read", "Sequential read"),
+                ("disk.rand-write", "Random write"),
+                ("disk.rand-read", "Random read"),
+            ],
+            "cpu": [
+                ("cpu.single-int", "Single-core integer"),
+                ("cpu.single-float", "Single-core float"),
+                ("cpu.multi", "Multi-core hash"),
+                ("cpu.compress", "Compression"),
+                ("cpu.crypto", "Cryptography"),
+            ],
+            "memory": [
+                ("mem.seq-read", "Sequential read"),
+                ("mem.seq-write", "Sequential write"),
+                ("mem.l1", "L1 cache"),
+                ("mem.l2", "L2 cache"),
+                ("mem.l3", "L3 cache"),
+                ("mem.copy", "Memory copy"),
+                ("mem.random", "Random access"),
+            ],
+            "gpu": [
+                ("gpu.matrix", "Matrix multiply"),
+                ("gpu.conv", "2D convolution"),
+                ("gpu.element", "Element-wise ops"),
+                ("gpu.transformer", "Transformer attention"),
+                ("gpu.memory", "GPU memory bandwidth"),
+                ("gpu.inference", "AI inference"),
+            ]
+        }
+        
+        for category in self.categories:
+            if category == "gpu" and not self.gpu_available:
+                continue
+            
+            self.console.print(f"\n[bold cyan]{category.upper()} Tests:[/bold cyan]")
+            tests = test_catalog.get(category, [])
+            for idx, (test_id, desc) in enumerate(tests, 1):
+                self.console.print(f"  [{idx}] {desc}")
+            
+            choices = Prompt.ask(
+                f"Select {category} tests (comma-separated numbers, or 'all')",
+                default="all"
+            )
+            
+            if choices.strip().lower() == "all":
+                selected.extend([test_id for test_id, _ in tests])
+            else:
+                try:
+                    indices = [int(c.strip()) - 1 for c in choices.split(",") if c.strip()]
+                    selected.extend([tests[i][0] for i in indices if 0 <= i < len(tests)])
+                except (ValueError, IndexError):
+                    # Invalid input, select all
+                    selected.extend([test_id for test_id, _ in tests])
+        
+        return selected if selected else None
+    
+    def _configure_parameters(self):
+        """Configure test parameters interactively"""
+        if "disk" in self.categories:
+            self.console.print("\n[bold] Disk Configuration[/bold]")
+            self.config['disk_size'] = IntPrompt.ask(
+                "  File size (MB)",
+                default=self.config['disk_size']
+            )
+            self.config['disk_block'] = IntPrompt.ask(
+                "  Block size (KB)",
+                default=self.config['disk_block']
+            )
+        
+        if "cpu" in self.categories:
+            self.console.print("\n[bold] CPU Configuration[/bold]")
+            self.config['cpu_duration'] = IntPrompt.ask(
+                "  Single-core test duration (seconds)",
+                default=self.config['cpu_duration']
+            )
+            self.config['cpu_multi_duration'] = IntPrompt.ask(
+                "  Multi-core test duration (seconds)",
+                default=self.config['cpu_multi_duration']
+            )
+        
+        if "memory" in self.categories:
+            self.console.print("\n[bold] Memory Configuration[/bold]")
+            self.config['mem_size'] = IntPrompt.ask(
+                "  Buffer size (MB)",
+                default=self.config['mem_size']
+            )
+        
+        if "gpu" in self.categories and self.gpu_available:
+            self.console.print("\n[bold] GPU Configuration[/bold]")
+            self.config['gpu_iterations'] = IntPrompt.ask(
+                "  Iteration count",
+                default=self.config['gpu_iterations']
+            )
     
     def show_summary(self):
         """Show final summary"""
@@ -568,7 +796,28 @@ Test Categories:
     parser.add_argument("--gpu-iterations", type=int, default=100,
                        help="GPU test iterations (default: 100)")
     
+    # Interactive mode control
+    parser.add_argument("--no-interactive", action="store_true",
+                       help="Skip interactive menu even if no other args provided")
+    
     args = parser.parse_args()
+    
+    # Detect if we should use interactive mode
+    # Interactive if: no args except program name, or only --categories/--tests not specified
+    import sys
+    use_interactive = (
+        len(sys.argv) == 1 or  # No arguments at all
+        (not args.no_interactive and 
+         args.categories == "all" and 
+         args.tests is None and
+         not args.list_tests and
+         args.size == 100 and
+         args.block == 4 and
+         args.cpu_duration == 5 and
+         args.cpu_multi_duration == 10 and
+         args.mem_size == 100 and
+         args.gpu_iterations == 100)
+    )
     
     # List tests if requested
     if args.list_tests:
@@ -612,6 +861,27 @@ Test Categories:
         console.print()
         return
     
+    # === INTERACTIVE MODE ===
+    if use_interactive:
+        # Create TUI with defaults for interactive configuration
+        tui = BenchLabTUI(
+            file_size_mb=args.size,
+            block_size_kb=args.block,
+            test_dir=args.dir,
+            categories=["disk", "cpu", "memory", "gpu"]
+        )
+        
+        # Show interactive menu and get configuration
+        if not tui.show_interactive_menu():
+            # User chose to exit
+            return
+        
+        # Run benchmarks with configured settings
+        tui.run_all_benchmarks()
+        tui.show_summary()
+        return
+    
+    # === CLI MODE ===
     # Parse categories or specific tests
     if args.tests:
         # Individual test selection
@@ -644,6 +914,8 @@ Test Categories:
     
     # Store test configuration in TUI
     tui.config = {
+        'disk_size': args.size,
+        'disk_block': args.block,
         'cpu_duration': args.cpu_duration,
         'cpu_multi_duration': args.cpu_multi_duration,
         'mem_size': args.mem_size,
@@ -651,7 +923,7 @@ Test Categories:
         'selected_tests': selected_tests
     }
     
-    tui.show_welcome()
+    # Non-interactive CLI mode - run directly
     tui.run_all_benchmarks()
     tui.show_summary()
 
