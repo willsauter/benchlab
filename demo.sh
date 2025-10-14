@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # BenchLab Demo Script
-# Runs a quick demo with smaller file size for demonstration
+# Runs a quick demo with disk tests only for fast demonstration
 
 echo "🎬 Starting BenchLab Demo..."
-echo "Running quick benchmark with 50MB file size..."
+echo "Running quick disk benchmark (disk tests only)..."
 echo ""
 
 # Check if virtual environment exists
@@ -17,8 +17,8 @@ fi
 # Activate virtual environment
 source venv/bin/activate
 
-# Run BenchLab with demo settings (smaller file for faster demo)
-python benchlab.py --size 50 --block 4
+# Run BenchLab with demo settings (disk only, smaller file)
+python benchlab.py --categories disk --size 50
 
 # Deactivate when done
 deactivate
