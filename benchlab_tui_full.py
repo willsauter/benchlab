@@ -15,6 +15,9 @@ from rich.text import Text
 from rich import box
 from rich.align import Align
 from rich.prompt import Prompt, Confirm, IntPrompt
+import json
+import os
+from pathlib import Path
 
 from benchmark import DiskBenchmark, BenchmarkResult
 from cpu_benchmark import CPUBenchmark, CPUBenchmarkResult
@@ -30,6 +33,7 @@ class BenchLabTUI:
         self.console = Console()
         
         # Initialize benchmarks
+        self.test_dir = test_dir
         self.disk_benchmark = DiskBenchmark(test_dir=test_dir, file_size_mb=file_size_mb, block_size_kb=block_size_kb)
         self.cpu_benchmark = CPUBenchmark()
         self.memory_benchmark = MemoryBenchmark()
@@ -59,8 +63,13 @@ class BenchLabTUI:
             'cpu_multi_duration': 10,
             'mem_size': 100,
             'gpu_iterations': 100,
-            'selected_tests': None
+            'selected_tests': None,
+            'preset': 'standard'
         }
+        
+        # Config directory
+        self.config_dir = Path.home() / ".benchlab"
+        self.config_file = self.config_dir / "config.json"
         
     def create_header(self) -> Panel:
         """Create animated header"""
@@ -500,46 +509,183 @@ class BenchLabTUI:
         self.console.clear()
         self.show_welcome()
         
-        # Main menu
-        self.console.print("\n[bold cyan]═══ Main Menu ═══[/bold cyan]\n")
-        self.console.print("[1] Run all tests with default settings")
-        self.console.print("[2] Customize test configuration")
-        self.console.print("[3] Quick test (fast settings)")
-        self.console.print("[4] Exit")
+        # Create colorful main menu
+        menu_table = Table(show_header=False, box=box.ROUNDED, border_style="bright_blue", padding=(0, 2))
+        menu_table.add_column(style="bold cyan", justify="center")
+        menu_table.add_column(style="white")
         
-        choice = Prompt.ask("\nSelect option", choices=["1", "2", "3", "4"], default="1")
+        menu_table.add_row("[1]", "[bold green]⚡ Quick Test[/bold green] - Fast validation (2-3 min)")
+        menu_table.add_row("[2]", "[bold cyan]📊 Standard Test[/bold cyan] - Balanced benchmark (8-12 min)")
+        menu_table.add_row("[3]", "[bold yellow]🔍 Thorough Test[/bold yellow] - Comprehensive analysis (20-30 min)")
+        menu_table.add_row("[4]", "[bold red]🔥 Stress Test[/bold red] - Maximum load testing (45-60 min)")
+        menu_table.add_row("", "")
+        menu_table.add_row("[5]", "[bold magenta]🎨 Custom Configuration[/bold magenta] - Choose your own settings")
+        menu_table.add_row("[6]", "[bold blue]💾 Load Saved Config[/bold blue] - Use previously saved settings")
+        menu_table.add_row("", "")
+        menu_table.add_row("[7]", "[bold white]🗄️ Database Profile[/bold white] - Random I/O workload (15-20 min)")
+        menu_table.add_row("[8]", "[bold white]🎬 Video Profile[/bold white] - Sequential I/O workload (10-15 min)")
+        menu_table.add_row("", "")
+        menu_table.add_row("[9]", "[dim]❌ Exit[/dim]")
         
-        if choice == "4":
-            self.console.print("\n[yellow]Exiting...[/yellow]")
+        menu_panel = Panel(
+            menu_table,
+            title="[bold bright_cyan]╔══════ 🎛️  BENCHLAB CONTROL CENTER  🎛️ ══════╗[/bold bright_cyan]",
+            border_style="bright_blue",
+            box=box.DOUBLE
+        )
+        
+        self.console.print(menu_panel)
+        
+        choice = Prompt.ask(
+            "\n[bold bright_yellow]Select an option[/bold bright_yellow]",
+            choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+            default="2"
+        )
+        
+        if choice == "9":
+            self.console.print("\n[yellow]👋 Goodbye![/yellow]")
             return False
         elif choice == "1":
-            # Use defaults, all categories
+            # Quick preset - All tests in selected categories
+            self.apply_preset('quick')
+            self.categories = ["disk", "cpu", "memory"]
+            self.config['selected_tests'] = None  # Run all tests in categories
+            self.console.print("\n[green]⚡ Quick test mode selected![/green]")
+            time.sleep(1)
+            return True
+        elif choice == "2":
+            # Standard preset - All tests in all categories
+            self.apply_preset('standard')
             self.categories = ["disk", "cpu", "memory", "gpu"]
-            self.config['selected_tests'] = None
+            self.config['selected_tests'] = None  # Run all tests in categories
+            self.console.print("\n[cyan]📊 Standard test mode selected![/cyan]")
+            time.sleep(1)
             return True
         elif choice == "3":
-            # Quick test settings
-            self.categories = ["disk", "cpu", "memory"]
-            self.config = {
-                'disk_size': 50,
-                'disk_block': 4,
-                'cpu_duration': 3,
-                'cpu_multi_duration': 5,
-                'mem_size': 50,
-                'gpu_iterations': 50,
-                'selected_tests': None
-            }
-            self.console.print("\n[green] Quick test mode selected (faster settings)[/green]")
+            # Thorough preset - All tests with longer durations
+            self.apply_preset('thorough')
+            self.categories = ["disk", "cpu", "memory", "gpu"]
+            self.config['selected_tests'] = None  # Run all tests in categories
+            self.console.print("\n[yellow]🔍 Thorough test mode selected![/yellow]")
+            time.sleep(1)
+            return True
+        elif choice == "4":
+            # Stress preset - All tests with maximum settings
+            self.apply_preset('stress')
+            self.categories = ["disk", "cpu", "memory", "gpu"]
+            self.config['selected_tests'] = None  # Run all tests in categories
+            self.console.print("\n[red]🔥 Stress test mode selected![/red]")
+            self.console.print("[bold red]⚠ Warning: This will run intensive tests for up to 60 minutes![/bold red]")
+            if not Confirm.ask("\nProceed with stress test?", default=True):
+                return self.show_interactive_menu()
+            time.sleep(1)
+            return True
+        elif choice == "5":
+            # Custom configuration
+            return self._customize_configuration()
+        elif choice == "6":
+            # Load saved config
+            return self._load_saved_configuration()
+        elif choice == "7":
+            # Database profile - Random I/O + Memory tests
+            self.apply_preset('database')
+            self.categories = ["disk", "memory"]
+            # Include disk random tests + all memory tests
+            self.config['selected_tests'] = [
+                'disk.rand-read', 'disk.rand-write',
+                'mem.seq-read', 'mem.seq-write', 'mem.l1', 'mem.l2', 'mem.l3', 'mem.copy', 'mem.random'
+            ]
+            self.console.print("\n[white]🗄️ Database workload profile selected![/white]")
+            self.console.print("[dim]Running: Random disk I/O + All memory tests[/dim]")
+            time.sleep(1)
+            return True
+        elif choice == "8":
+            # Video profile - Sequential I/O + CPU + GPU tests
+            self.apply_preset('video')
+            self.categories = ["disk", "cpu", "gpu"]
+            # Include disk sequential + CPU multi-core + GPU tests
+            self.config['selected_tests'] = [
+                'disk.seq-read', 'disk.seq-write',
+                'cpu.multi', 'cpu.compress',
+                'gpu.matrix', 'gpu.conv', 'gpu.memory'
+            ]
+            self.console.print("\n[white]🎬 Video editing profile selected![/white]")
+            self.console.print("[dim]Running: Sequential disk I/O + CPU multi-core + GPU compute[/dim]")
+            time.sleep(1)
+            return True
+        
+        return False
+    
+    def _load_saved_configuration(self) -> bool:
+        """Load a saved configuration"""
+        saved_configs = self.list_saved_configs()
+        
+        if not saved_configs:
+            self.console.print("\n[yellow]⚠ No saved configurations found[/yellow]")
+            time.sleep(2)
+            return self.show_interactive_menu()
+        
+        self.console.clear()
+        self.console.print("\n[bold blue]═══ Load Saved Configuration ═══[/bold blue]\n")
+        
+        config_table = Table(show_header=True, box=box.ROUNDED, border_style="blue")
+        config_table.add_column("#", style="cyan", justify="center")
+        config_table.add_column("Configuration Name", style="bright_white")
+        
+        for idx, name in enumerate(saved_configs, 1):
+            config_table.add_row(str(idx), name)
+        
+        self.console.print(config_table)
+        self.console.print()
+        
+        choice = Prompt.ask(
+            "Select configuration number (or 'back' to return)",
+            choices=[str(i) for i in range(1, len(saved_configs) + 1)] + ["back"],
+            default="1"
+        )
+        
+        if choice == "back":
+            return self.show_interactive_menu()
+        
+        config_name = saved_configs[int(choice) - 1]
+        if self.load_config(config_name):
             time.sleep(1)
             return True
         else:
-            # Customize
-            return self._customize_configuration()
+            time.sleep(2)
+            return self.show_interactive_menu()
     
     def _customize_configuration(self) -> bool:
         """Interactive configuration customization"""
         self.console.clear()
-        self.console.print("\n[bold cyan]═══ Customize Configuration ═══[/bold cyan]\n")
+        self.console.print("\n[bold magenta]╔═══════════════════════════════════╗[/bold magenta]")
+        self.console.print("[bold magenta]║  🎨 CUSTOM CONFIGURATION WIZARD   ║[/bold magenta]")
+        self.console.print("[bold magenta]╚═══════════════════════════════════╝[/bold magenta]\n")
+        
+        # Step 0: Choose preset as starting point
+        self.console.print("[bold cyan]Step 0: Choose Starting Preset[/bold cyan]\n")
+        presets = self.get_presets()
+        preset_table = Table(show_header=True, box=box.SIMPLE, border_style="cyan")
+        preset_table.add_column("#", style="cyan", justify="center")
+        preset_table.add_column("Preset", style="bold")
+        preset_table.add_column("Description", style="dim")
+        
+        preset_list = list(presets.keys())
+        for idx, key in enumerate(preset_list, 1):
+            preset = presets[key]
+            preset_table.add_row(str(idx), preset['name'], preset['desc'])
+        
+        self.console.print(preset_table)
+        self.console.print()
+        
+        preset_choice = Prompt.ask(
+            "Select a preset to start from",
+            choices=[str(i) for i in range(1, len(preset_list) + 1)],
+            default="2"
+        )
+        
+        self.apply_preset(preset_list[int(preset_choice) - 1])
+        self.console.print(f"\n[green]✓ Applied {presets[preset_list[int(preset_choice) - 1]]['name']} preset[/green]\n")
         
         # Step 1: Select categories
         self.console.print("[bold yellow]Step 1: Select Test Categories[/bold yellow]\n")
@@ -592,7 +738,15 @@ class BenchLabTUI:
         self.console.print(f"GPU: [cyan]{self.config['gpu_iterations']} iterations[/cyan]")
         
         self.console.print("")
-        proceed = Confirm.ask("Start benchmark with these settings?", default=True)
+        
+        # Option to save configuration
+        save_config = Confirm.ask("💾 Save this configuration for later use?", default=False)
+        if save_config:
+            config_name = Prompt.ask("Enter configuration name", default="my_config")
+            self.save_config(config_name)
+        
+        self.console.print("")
+        proceed = Confirm.ask("🚀 Start benchmark with these settings?", default=True)
         
         if not proceed:
             retry = Confirm.ask("Return to main menu?", default=True)
@@ -677,6 +831,8 @@ class BenchLabTUI:
                 "  Block size (KB)",
                 default=self.config['disk_block']
             )
+            # Update disk benchmark immediately
+            self._update_disk_benchmark()
         
         if "cpu" in self.categories:
             self.console.print("\n[bold] CPU Configuration[/bold]")
@@ -702,6 +858,157 @@ class BenchLabTUI:
                 "  Iteration count",
                 default=self.config['gpu_iterations']
             )
+    
+    def get_presets(self):
+        """Get test duration presets"""
+        return {
+            'quick': {
+                'name': '⚡ Quick',
+                'desc': 'Fast validation (~2-3 min)',
+                'disk_size': 50,
+                'disk_block': 4,
+                'cpu_duration': 3,
+                'cpu_multi_duration': 5,
+                'mem_size': 50,
+                'gpu_iterations': 50
+            },
+            'standard': {
+                'name': '📊 Standard',
+                'desc': 'Balanced testing (~8-12 min)',
+                'disk_size': 100,
+                'disk_block': 4,
+                'cpu_duration': 5,
+                'cpu_multi_duration': 10,
+                'mem_size': 100,
+                'gpu_iterations': 100
+            },
+            'thorough': {
+                'name': '🔍 Thorough',
+                'desc': 'Comprehensive analysis (~20-30 min)',
+                'disk_size': 500,
+                'disk_block': 4,
+                'cpu_duration': 15,
+                'cpu_multi_duration': 30,
+                'mem_size': 200,
+                'gpu_iterations': 200
+            },
+            'stress': {
+                'name': '🔥 Stress Test',
+                'desc': 'Maximum load testing (~45-60 min)',
+                'disk_size': 1000,
+                'disk_block': 4,
+                'cpu_duration': 30,
+                'cpu_multi_duration': 60,
+                'mem_size': 500,
+                'gpu_iterations': 500
+            },
+            'database': {
+                'name': '🗄️ Database Workload',
+                'desc': 'Random I/O focused (~15-20 min)',
+                'disk_size': 500,
+                'disk_block': 4,
+                'cpu_duration': 10,
+                'cpu_multi_duration': 20,
+                'mem_size': 200,
+                'gpu_iterations': 100
+            },
+            'video': {
+                'name': '🎬 Video Editing',
+                'desc': 'Sequential I/O focused (~10-15 min)',
+                'disk_size': 1000,
+                'disk_block': 128,
+                'cpu_duration': 10,
+                'cpu_multi_duration': 20,
+                'mem_size': 500,
+                'gpu_iterations': 200
+            }
+        }
+    
+    def apply_preset(self, preset_name: str):
+        """Apply a preset configuration"""
+        presets = self.get_presets()
+        if preset_name in presets:
+            preset = presets[preset_name]
+            self.config['disk_size'] = preset['disk_size']
+            self.config['disk_block'] = preset['disk_block']
+            self.config['cpu_duration'] = preset['cpu_duration']
+            self.config['cpu_multi_duration'] = preset['cpu_multi_duration']
+            self.config['mem_size'] = preset['mem_size']
+            self.config['gpu_iterations'] = preset['gpu_iterations']
+            self.config['preset'] = preset_name
+            # Update disk benchmark with new settings
+            self._update_disk_benchmark()
+    
+    def _update_disk_benchmark(self):
+        """Reinitialize disk benchmark with current config settings"""
+        self.disk_benchmark = DiskBenchmark(
+            test_dir=self.test_dir,
+            file_size_mb=self.config['disk_size'],
+            block_size_kb=self.config['disk_block']
+        )
+    
+    def save_config(self, name: str = "default"):
+        """Save current configuration to file"""
+        self.config_dir.mkdir(exist_ok=True)
+        
+        # Load existing configs
+        all_configs = {}
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r') as f:
+                    all_configs = json.load(f)
+            except:
+                pass
+        
+        # Save current config
+        all_configs[name] = {
+            'config': self.config.copy(),
+            'categories': self.categories.copy()
+        }
+        
+        with open(self.config_file, 'w') as f:
+            json.dump(all_configs, f, indent=2)
+        
+        self.console.print(f"\n[green]✓ Configuration '{name}' saved successfully![/green]")
+    
+    def load_config(self, name: str = "default") -> bool:
+        """Load configuration from file"""
+        if not self.config_file.exists():
+            self.console.print(f"\n[yellow]⚠ No saved configurations found[/yellow]")
+            return False
+        
+        try:
+            with open(self.config_file, 'r') as f:
+                all_configs = json.load(f)
+            
+            if name not in all_configs:
+                self.console.print(f"\n[yellow]⚠ Configuration '{name}' not found[/yellow]")
+                return False
+            
+            saved = all_configs[name]
+            self.config = saved['config'].copy()
+            self.categories = saved['categories'].copy()
+            
+            # Update disk benchmark with loaded settings
+            self._update_disk_benchmark()
+            
+            self.console.print(f"\n[green]✓ Configuration '{name}' loaded successfully![/green]")
+            return True
+        except Exception as e:
+            self.console.print(f"\n[red]✗ Error loading configuration: {e}[/red]")
+            return False
+    
+    def list_saved_configs(self) -> list:
+        """List all saved configurations"""
+        if not self.config_file.exists():
+            return []
+        
+        try:
+            with open(self.config_file, 'r') as f:
+                all_configs = json.load(f)
+            return list(all_configs.keys())
+        except:
+            return []
     
     def show_summary(self):
         """Show final summary"""
